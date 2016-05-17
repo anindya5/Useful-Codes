@@ -1,0 +1,109 @@
+%macro woe;
+/********************** Code created by Anindya Sankar Dey ********************************/
+/*Run a proc contents first, and store it in a dataset. Then store the numericals and the char rows separately into abcnum and abcchar*/
+/*Code created with dependendent variable adv_cat having two values ADV and DET*/
+/* Very old code. Proper debugging and modification needed*/
+
+data _NULL_;
+set abcnum end=endl;
+call symput('numvar'||left(_N_),compress(NAME));
+if endl then call symput('numeol',_N_);
+run;
+data _NULL_;
+set abcchar end=endl;
+call symput('charvar'||left(_N_),NAME);
+if endl then call symput('chareol',left(_N_));
+run;
+%put(&numeol);
+%put(&numvar1);
+
+proc rank data=<data> out=<data>_woe ties=low groups=10;
+var %do i=1 %to &numeol; &&numvar&i. %end;;
+ranks %do i=1 %to &numeol; rank&i %end;;
+run;
+
+
+%do i=1 %to &numeol;
+
+proc freq data=<data>_woe;
+table  rank&i.*adv_cat /norow nocol nopercent noprint out=woe_freq&i;
+run;
+proc transpose data=woe_freq&i out=woe&i(drop= _NAME_ _LABEL_) prefix=state;
+by rank&i;
+id adv_cat;
+var count;
+run;
+
+proc delete data=woe_freq&i; run;
+
+proc stdize data=woe&i reponly missing=0 out=woes&i;run;
+
+data woe&i;
+set woes&i;
+percADV=stateADV/(stateADV+stateDET);
+percDET=stateDET/(stateADV+stateDET);
+woe=log(percADV/percDET)*100;
+iv=woe*(percADV-percDET)/100;
+run;
+
+%if &i=1 %then %create_iv_file;
+%else %append_iv_num_file(k=&i);
+
+
+proc delete data=woes&i;run;
+proc delete data=woe&i;run;
+%end;
+
+%do i=%eval(&numeol+1) %to %eval(&numeol+&chareol);
+%let j=%eval(&i-&numeol);
+proc freq data=nps_req_woe;
+table  &&charvar&j.*adv_cat /norow nocol nopercent noprint out=woe_freq&i;
+run;
+proc transpose data=woe_freq&i out=woe&i(drop= _NAME_ _LABEL_) prefix=state;
+by &&charvar&j.;
+id adv_cat;
+var count;
+run;
+
+proc delete data=woe_freq&i; run;
+
+proc stdize data=woe&i reponly missing=0 out=woes&i;run;
+
+data woe&i;
+set woes&i;
+percADV=stateADV/(stateADV+stateDET);
+percDET=stateDET/(stateADV+stateDET);
+woe=log(percADV/percDET)*100;
+iv=woe*(percADV-percDET)/100;
+run;
+
+%append_iv_char_file(k=&i,s=&j);
+/*proc sql; select "&&charvar&j.",sum(iv) as IV from woe&i; quit;*/
+
+proc delete data=woes&i;run;
+proc delete data=woe&i;run;
+%end;
+
+data nps_iv(rename=(_TEMA002=Variable)); 
+format Variable $200.;
+format IV percent6.2;
+set nps_iv;
+run;
+
+%mend;
+%macro create_iv_file;
+proc sql; create table nps_iv as select "&numvar1",sum(iv) as IV from woe1; quit;
+%mend;
+%macro append_iv_num_file(k=);
+proc sql; create table append_iv_num as select "&&numvar&k.",sum(iv) as IV from woe&k; quit;
+data nps_iv;
+set nps_iv append_iv_num; 
+%mend;
+%macro append_iv_char_file(k=,s=);
+proc sql; create table append_iv_char as select "&&charvar&s.",sum(iv) as IV from woe&k; quit;
+data nps_iv;
+set nps_iv append_iv_char; 
+%mend;
+%woe;
+
+
